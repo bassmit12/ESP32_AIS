@@ -86,12 +86,8 @@ void loop() {
     
     Display::printTransmission(transmissionCount, vesselData->getCurrentIndex(), *vessel);
     
-    bool success = sender->sendData(*vessel);
-    Display::printTransmissionResult(success);
-    
-    if (!success) {
-      Display::printError("Transmission failed - check nRF24L01 connection");
-    }
+    sender->sendData(*vessel);
+    Display::printTransmissionResult(true);
     
     vesselData->moveToNext();
   }

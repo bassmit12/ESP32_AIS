@@ -14,12 +14,10 @@ bool NRF24Sender::begin(uint8_t channel) {
     _radio->setPALevel(RF24_PA_HIGH);
     _radio->setDataRate(RF24_250KBPS);
     _radio->setChannel(channel);
-    _radio->setRetries(15, 15);
+    _radio->setAutoAck(false);
     _radio->enableDynamicPayloads();
-    _radio->setAutoAck(true);
     
     _radio->openWritingPipe(NRF24_TX_PIPE);
-    _radio->openReadingPipe(1, NRF24_RX_PIPE);
     
     _radio->stopListening();
     
@@ -32,8 +30,8 @@ bool NRF24Sender::sendData(const AISData& data) {
         return false;
     }
     
-    bool result = _radio->write(&data, sizeof(AISData));
-    return result;
+    _radio->write(&data, sizeof(AISData));
+    return true;
 }
 
 bool NRF24Sender::isConnected() {

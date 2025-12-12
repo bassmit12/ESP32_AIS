@@ -51,7 +51,7 @@ void setup() {
     return;
   }
   
-  vesselData = new VesselData(3);
+  vesselData = new VesselData(1);
   vesselData->initialize();
   Display::printVesselDatabase(vesselData->getVesselCount());
 }
@@ -67,8 +67,17 @@ void loop() {
     return;
   }
   
+  static unsigned long lastUpdateTime = 0;
   unsigned long currentTime = millis();
   
+  // Update vessel position every second
+  if (currentTime - lastUpdateTime >= 1000) {
+    unsigned long deltaTime = currentTime - lastUpdateTime;
+    vesselData->updatePositions(deltaTime);
+    lastUpdateTime = currentTime;
+  }
+  
+  // Send AIS data at configured interval
   if (currentTime - lastSendTime >= SEND_INTERVAL_MS) {
     lastSendTime = currentTime;
     transmissionCount++;

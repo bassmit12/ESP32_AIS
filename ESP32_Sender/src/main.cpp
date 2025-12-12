@@ -51,7 +51,7 @@ void setup() {
     return;
   }
   
-  vesselData = new VesselData(1);
+  vesselData = new VesselData(2);
   vesselData->initialize();
   Display::printVesselDatabase(vesselData->getVesselCount());
 }

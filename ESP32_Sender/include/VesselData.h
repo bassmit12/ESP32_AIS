@@ -12,7 +12,7 @@ struct Waypoint {
 
 class VesselData {
 public:
-    VesselData(int maxVessels = 1);
+    VesselData(int maxVessels = 2);
     ~VesselData();
     
     void initialize();
@@ -24,10 +24,11 @@ public:
     
 private:
     AISData* _vessels;
+    int* _waypointIndices;
     int _vesselCount;
     int _currentIndex;
-    int _currentWaypointIndex;
     
+    void updateVesselPosition(int vesselIndex, unsigned long deltaTime);
     void createVessel(int index, uint32_t mmsi, const char* name, 
                      float lat, float lon, float sog, float cog, 
                      uint16_t heading, uint8_t status);

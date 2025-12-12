@@ -1,0 +1,344 @@
+#include <Arduino.h>
+#include <esp_now.h>
+#include <WiFi.h>
+#include <esp_wifi.h>
+#include "AISData.h"
+#include "config.h"
+
+WiFiClient tcpClient;
+unsigned long lastReconnectAttempt = 0;
+bool wifiConnected = false;
+bool signalkConnected = false;
+
+const char* getNavStatusString(uint8_t status) {
+  switch(status) {
+    case NAV_STATUS_UNDERWAY_ENGINE: return "Underway (Engine)";
+    case NAV_STATUS_ANCHORED: return "Anchored";
+    case NAV_STATUS_NOT_UNDER_COMMAND: return "Not Under Command";
+    case NAV_STATUS_RESTRICTED_MANOEUVRABILITY: return "Restricted Manoeuvrability";
+    case NAV_STATUS_CONSTRAINED_BY_DRAUGHT: return "Constrained by Draught";
+    case NAV_STATUS_MOORED: return "Moored";
+    case NAV_STATUS_AGROUND: return "Aground";
+    case NAV_STATUS_FISHING: return "Fishing";
+    case NAV_STATUS_UNDERWAY_SAILING: return "Underway (Sailing)";
+    default: return "Unknown";
+  }
+}
+
+void printConnectionStatus() {
+  Serial.println("\n┌──────────── CONNECTION STATUS ────────────┐");
+  
+  // WiFi Status
+  Serial.print("│ WiFi:    ");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("✓ CONNECTED (");
+    Serial.print(WiFi.localIP());
+    Serial.println(")     ");
+  } else {
+    Serial.println("✗ DISCONNECTED                  ");
+  }
+  
+  Serial.print("│ SignalK: ");
+  if (tcpClient.connected()) {
+    Serial.print("✓ CONNECTED (");
+    Serial.print(SIGNALK_SERVER);
+    Serial.print(":");
+    Serial.print(SIGNALK_PORT);
+    Serial.println(")");
+  } else {
+    Serial.println("✗ DISCONNECTED                  ");
+  }
+  
+  // ESP-NOW Status
+  Serial.println("│ ESP-NOW: ✓ ACTIVE (listening)          ");
+  
+  Serial.println("└────────────────────────────────────────┘\n");
+}
+
+void connectToSignalK() {
+  if (tcpClient.connected()) {
+    if (!signalkConnected) {
+      signalkConnected = true;
+      Serial.println("┌────────────────────────────────────────┐");
+      Serial.println("│ ✓ SignalK TCP CONNECTED                │");
+      Serial.print  ("│   ");
+      Serial.print(SIGNALK_SERVER);
+      Serial.print(":");
+      Serial.print(SIGNALK_PORT);
+      Serial.println("                     │");
+      Serial.println("└────────────────────────────────────────┘\n");
+    }
+    return;
+  }
+  
+  unsigned long currentTime = millis();
+  if (currentTime - lastReconnectAttempt < SIGNALK_RECONNECT_INTERVAL_MS) {
+    return;
+  }
+  
+  lastReconnectAttempt = currentTime;
+  signalkConnected = false;
+  
+  Serial.print("→ Attempting SignalK connection... ");
+  
+  if (tcpClient.connect(SIGNALK_SERVER, SIGNALK_PORT)) {
+    signalkConnected = true;
+    Serial.println("SUCCESS!");
+    Serial.println("┌────────────────────────────────────────┐");
+    Serial.println("│ ✓ SignalK TCP CONNECTED                │");
+    Serial.println("└────────────────────────────────────────┘\n");
+  } else {
+    Serial.println("FAILED!");
+    Serial.println("  ⚠ Cannot reach SignalK server");
+    Serial.println("  ⚠ Will retry in 5 seconds...\n");
+  }
+}
+
+// Calculate NMEA checksum
+uint8_t calculateChecksum(const char* sentence) {
+  uint8_t checksum = 0;
+  // Start after $ or !, end before *
+  for (int i = 1; sentence[i] != '*' && sentence[i] != '\0'; i++) {
+    checksum ^= sentence[i];
+  }
+  return checksum;
+}
+
+void latToNMEA(float lat, char* result, char* ns) {
+  *ns = (lat >= 0) ? 'N' : 'S';
+  float absLat = fabs(lat);
+  int degrees = (int)absLat;
+  float minutes = (absLat - degrees) * 60.0;
+  sprintf(result, "%02d%07.4f", degrees, minutes);
+}
+
+void lonToNMEA(float lon, char* result, char* ew) {
+  *ew = (lon >= 0) ? 'E' : 'W';
+  float absLon = fabs(lon);
+  int degrees = (int)absLon;
+  float minutes = (absLon - degrees) * 60.0;
+  sprintf(result, "%03d%07.4f", degrees, minutes);
+}
+
+void sendToSignalK(const AISData &data) {
+  if (!tcpClient.connected()) {
+    if (signalkConnected) {
+      Serial.println("┌────────────────────────────────────────┐");
+      Serial.println("│ ✗ SignalK TCP DISCONNECTED             │");
+      Serial.println("└────────────────────────────────────────┘\n");
+      signalkConnected = false;
+    }
+    connectToSignalK();
+    if (!tcpClient.connected()) {
+      Serial.println("  ⚠ Skipping SignalK send - not connected\n");
+      return;
+    }
+  }
+  
+  char latStr[16], lonStr[16];
+  char ns, ew;
+  latToNMEA(data.latitude, latStr, &ns);
+  lonToNMEA(data.longitude, lonStr, &ew);
+  
+  char sentence[256];
+  snprintf(sentence, sizeof(sentence),
+    "$GPGGA,120000,%s,%c,%s,%c,1,08,0.9,%.1f,M,0.0,M,,*",
+    latStr, ns, lonStr, ew, (float)data.sog
+  );
+  
+  uint8_t checksum = calculateChecksum(sentence);
+  char fullSentence[300];
+  snprintf(fullSentence, sizeof(fullSentence), "%s%02X\r\n", sentence, checksum);
+  
+  char vesselInfo[256];
+  snprintf(vesselInfo, sizeof(vesselInfo),
+    "$PNEPT,MMSI=%lu,NAME=%s,SOG=%.1f,COG=%.1f,HDG=%u,STATUS=%u*",
+    data.mmsi, data.vesselName, data.sog, data.cog, data.heading, data.navStatus
+  );
+  
+  checksum = calculateChecksum(vesselInfo);
+  char fullVesselInfo[300];
+  snprintf(fullVesselInfo, sizeof(fullVesselInfo), "%s%02X\r\n", vesselInfo, checksum);
+  
+  size_t written = tcpClient.print(fullSentence) + tcpClient.print(fullVesselInfo);
+  
+  Serial.println("  ┌─ SignalK Forward (NMEA0183) ──────┐");
+  if (written > 0) {
+    Serial.print("  │ ✓ Sent ");
+    Serial.print(written);
+    Serial.println(" bytes (NMEA)          │");
+    Serial.println("  │ Format: NMEA0183/AIS               │");
+  } else {
+    Serial.println("  │ ✗ FAILED                           │");
+    tcpClient.stop();
+    signalkConnected = false;
+  }
+  Serial.println("  └────────────────────────────────────┘\n");
+}
+
+void displayAISData(const AISData &data) {
+  Serial.println("╔═══════════════════════════════════════════════╗");
+  Serial.println("║      🚢 AIS VESSEL DATA RECEIVED 🚢          ║");
+  Serial.println("╠═══════════════════════════════════════════════╣");
+  Serial.print("║ Vessel Name:  ");
+  Serial.println(data.vesselName);
+  Serial.print("║ MMSI:         ");
+  Serial.println(data.mmsi);
+  Serial.print("║ Position:     ");
+  Serial.print(data.latitude, 6);
+  Serial.print("° N, ");
+  Serial.print(data.longitude, 6);
+  Serial.println("° E");
+  Serial.print("║ Speed (SOG):  ");
+  Serial.print(data.sog, 1);
+  Serial.println(" knots");
+  Serial.print("║ Course (COG): ");
+  Serial.print(data.cog, 1);
+  Serial.println("°");
+  Serial.print("║ Heading:      ");
+  if (data.heading == 511) {
+    Serial.println("Not Available");
+  } else {
+    Serial.print(data.heading);
+    Serial.println("°");
+  }
+  Serial.print("║ Nav Status:   ");
+  Serial.println(getNavStatusString(data.navStatus));
+  Serial.println("╚═══════════════════════════════════════════════╝");
+}
+
+void onDataReceive(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  if (data_len != sizeof(AISData)) {
+    Serial.println("⚠ ERROR: Received invalid data size");
+    return;
+  }
+  
+  AISData receivedData;
+  memcpy(&receivedData, data, sizeof(AISData));
+  
+  Serial.println("\n===============================================");
+  Serial.println("    📡 ESP-NOW TRANSMISSION RECEIVED 📡");
+  Serial.println("===============================================\n");
+  
+  displayAISData(receivedData);
+  sendToSignalK(receivedData);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("\n\n");
+  Serial.println("███████████████████████████████████████████████");
+  Serial.println("█                                             █");
+  Serial.println("█   ESP32 AIS RECEIVER - SIGNALK GATEWAY     █");
+  Serial.println("█                                             █");
+  Serial.println("███████████████████████████████████████████████");
+  Serial.println();
+  
+  Serial.println("┌─────────── WIFI SETUP ──────────────┐");
+  WiFi.mode(WIFI_AP_STA);
+  
+  Serial.print("│ SSID: ");
+  Serial.println(WIFI_SSID);
+  Serial.println("│ Connecting...");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  
+  int wifiTimeout = 0;
+  Serial.print("│ ");
+  while (WiFi.status() != WL_CONNECTED && wifiTimeout < WIFI_TIMEOUT_SEC) {
+    delay(500);
+    Serial.print(".");
+    wifiTimeout++;
+    if (wifiTimeout % 10 == 0) Serial.print("\n│ ");
+  }
+  Serial.println();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConnected = true;
+    Serial.println("│ ✓ WiFi CONNECTION SUCCESSFUL!");
+    Serial.print("│ IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("│ Signal: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+    Serial.print("│ WiFi Channel: ");
+    Serial.println(WiFi.channel());
+  } else {
+    wifiConnected = false;
+    Serial.println("│ ✗ WiFi CONNECTION FAILED!");
+    Serial.println("│ ⚠ Will continue trying...");
+  }
+  Serial.println("└─────────────────────────────────────┘\n");
+  
+  Serial.println("┌───────── ESP-NOW SETUP ─────────────┐");
+  Serial.print("│ MAC: ");
+  Serial.println(WiFi.macAddress());
+  
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("│ ✗ ERROR: Initialization failed!");
+    Serial.println("└─────────────────────────────────────┘\n");
+    return;
+  }
+  
+  esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  Serial.print("│ ✓ ESP-NOW channel set to ");
+  Serial.println(ESPNOW_CHANNEL);
+  
+  esp_now_register_recv_cb(onDataReceive);
+  Serial.println("│ ✓ ESP-NOW initialized");
+  Serial.println("│ ✓ Listening for AIS data...");
+  Serial.println("└─────────────────────────────────────┘\n");
+  
+  Serial.println("┌──────── SIGNALK CONFIG ─────────────┐");
+  Serial.print("│ Server: ");
+  Serial.print(SIGNALK_SERVER);
+  Serial.print(":");
+  Serial.println(SIGNALK_PORT);
+  Serial.println("│ Connecting...");
+  Serial.println("└─────────────────────────────────────┘\n");
+  
+  connectToSignalK();
+  printConnectionStatus();
+  
+  Serial.println("🟢 SYSTEM READY - Waiting for AIS data...\n");
+  Serial.println("===============================================\n");
+}
+
+void loop() {
+  static unsigned long lastStatusPrint = 0;
+  
+  connectToSignalK();
+  
+  static unsigned long lastWifiCheck = 0;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiConnected) {
+      Serial.println("┌─────────────────────────────────────┐");
+      Serial.println("│ ✗ WiFi connection LOST!             │");
+      Serial.println("└─────────────────────────────────────┘\n");
+      wifiConnected = false;
+    }
+    
+    if (millis() - lastWifiCheck > WIFI_RECONNECT_INTERVAL_MS) {
+      lastWifiCheck = millis();
+      Serial.println("→ Attempting WiFi reconnection...");
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
+  } else {
+    if (!wifiConnected) {
+      Serial.println("┌─────────────────────────────────────┐");
+      Serial.println("│ ✓ WiFi RECONNECTED!                 │");
+      Serial.print  ("│ IP: ");
+      Serial.println(WiFi.localIP());
+      Serial.println("└─────────────────────────────────────┘\n");
+      wifiConnected = true;
+    }
+  }
+  
+  if (millis() - lastStatusPrint > STATUS_PRINT_INTERVAL_MS) {
+    lastStatusPrint = millis();
+    printConnectionStatus();
+  }
+  
+  delay(100);
+}

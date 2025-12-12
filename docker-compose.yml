@@ -1,0 +1,22 @@
+services:
+  signalk-server:
+    image: cr.signalk.io/signalk/signalk-server:master
+    container_name: signalk-server
+    restart: unless-stopped
+    networks:
+      - ais-network
+    ports:
+      - "3000:3000"      # SignalK UI
+      - "10110:10110"    # TCP Server input for ESP32
+    volumes:
+      - signalk-data:/home/node/.signalk
+    environment:
+      - TZ=Europe/Amsterdam
+
+networks:
+  ais-network:
+    driver: bridge
+
+volumes:
+  signalk-data:
+    driver: local

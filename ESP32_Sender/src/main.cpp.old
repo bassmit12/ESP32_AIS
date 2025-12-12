@@ -1,0 +1,184 @@
+#include <Arduino.h>
+#include <esp_now.h>
+#include <WiFi.h>
+#include "AISData.h"
+#include "config.h"
+
+uint8_t receiverAddress[] = {
+  RECEIVER_MAC_0, RECEIVER_MAC_1, RECEIVER_MAC_2,
+  RECEIVER_MAC_3, RECEIVER_MAC_4, RECEIVER_MAC_5
+};
+
+AISData vessels[3];
+int currentVessel = 0;
+unsigned long lastSendTime = 0;
+int transmissionCount = 0;
+
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("  ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "✓ TRANSMISSION SUCCESSFUL" : "✗ TRANSMISSION FAILED!");
+  if (status != ESP_NOW_SEND_SUCCESS) {
+    Serial.println("  ⚠ Check receiver is powered on");
+    Serial.println("  ⚠ Check MAC address is correct");
+  }
+  Serial.println("─────────────────────────────────────────\n");
+}
+
+void initializeVessels() {
+  // Vessel 1: Cargo ship near Rotterdam
+  vessels[0].mmsi = 244620000;
+  vessels[0].latitude = 51.9225;
+  vessels[0].longitude = 4.4792;
+  vessels[0].sog = 12.5;
+  vessels[0].cog = 285.0;
+  vessels[0].heading = 287;
+  vessels[0].navStatus = NAV_STATUS_UNDERWAY_ENGINE;
+  strcpy(vessels[0].vesselName, "NORDIC FIGHTER");
+
+  // Vessel 2: Fishing vessel
+  vessels[1].mmsi = 219012345;
+  vessels[1].latitude = 51.8945;
+  vessels[1].longitude = 4.3210;
+  vessels[1].sog = 3.2;
+  vessels[1].cog = 145.0;
+  vessels[1].heading = 148;
+  vessels[1].navStatus = NAV_STATUS_FISHING;
+  strcpy(vessels[1].vesselName, "OCEAN HARVEST");
+
+  // Vessel 3: Anchored vessel
+  vessels[2].mmsi = 211234567;
+  vessels[2].latitude = 51.9556;
+  vessels[2].longitude = 4.5123;
+  vessels[2].sog = 0.1;
+  vessels[2].cog = 0.0;
+  vessels[2].heading = 312;
+  vessels[2].navStatus = NAV_STATUS_ANCHORED;
+  strcpy(vessels[2].vesselName, "SEABIRD");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("\n\n");
+  Serial.println("███████████████████████████████████████████████");
+  Serial.println("█                                             █");
+  Serial.println("█      ESP32 AIS SENDER (ESP-NOW)            █");
+  Serial.println("█                                             █");
+  Serial.println("███████████████████████████████████████████████");
+  Serial.println();
+  
+  Serial.println("┌─────────── WIFI SETUP ──────────────┐");
+  WiFi.mode(WIFI_AP_STA);
+  
+  Serial.print("│ SSID: ");
+  Serial.println(WIFI_SSID);
+  Serial.println("│ Connecting...");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  
+  int wifiTimeout = 0;
+  Serial.print("│ ");
+  while (WiFi.status() != WL_CONNECTED && wifiTimeout < WIFI_TIMEOUT_SEC) {
+    delay(500);
+    Serial.print(".");
+    wifiTimeout++;
+    if (wifiTimeout % 10 == 0) Serial.print("\n│ ");
+  }
+  Serial.println();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("│ ✓ WiFi CONNECTION SUCCESSFUL!");
+    Serial.print("│ IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("│ Channel: ");
+    Serial.println(WiFi.channel());
+  } else {
+    Serial.println("│ ✗ WiFi CONNECTION FAILED!");
+    Serial.println("│ ⚠ Continuing anyway...");
+  }
+  Serial.println("└─────────────────────────────────────┘\n");
+  
+  Serial.println("┌───────── ESP-NOW SETUP ─────────────┐");
+  Serial.print("│ Sender MAC: ");
+  Serial.println(WiFi.macAddress());
+  
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("│ ✗ ERROR: ESP-NOW init failed!");
+    Serial.println("└─────────────────────────────────────┘\n");
+    return;
+  }
+  
+  esp_now_register_send_cb(onDataSent);
+  
+  esp_now_peer_info_t peerInfo;
+  memset(&peerInfo, 0, sizeof(peerInfo));
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("│ ✗ ERROR: Failed to add peer!");
+    Serial.println("└─────────────────────────────────────┘\n");
+    return;
+  }
+  
+  Serial.println("│ ✓ ESP-NOW initialized");
+  Serial.print("│ Target MAC: ");
+  Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X\n", 
+    receiverAddress[0], receiverAddress[1], receiverAddress[2],
+    receiverAddress[3], receiverAddress[4], receiverAddress[5]);
+  Serial.println("└─────────────────────────────────────┘\n");
+  
+  initializeVessels();
+  
+  Serial.println("┌──────── VESSEL DATABASE ────────────┐");
+  Serial.println("│ 3 sample vessels loaded:            │");
+  Serial.println("│  1. NORDIC FIGHTER (Cargo)          │");
+  Serial.println("│  2. OCEAN HARVEST (Fishing)         │");
+  Serial.println("│  3. SEABIRD (Anchored)              │");
+  Serial.println("└─────────────────────────────────────┘\n");
+  
+  Serial.println("🟢 SYSTEM READY - Transmitting every 3 seconds\n");
+  Serial.println("═════════════════════════════════════════════\n");
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+  
+  if (currentTime - lastSendTime >= SEND_INTERVAL_MS) {
+    lastSendTime = currentTime;
+    transmissionCount++;
+    
+    AISData* vessel = &vessels[currentVessel];
+    
+    Serial.println("┌─ TRANSMITTING AIS DATA ─────────────┐");
+    Serial.print("│ #");
+    Serial.print(transmissionCount);
+    Serial.print(" Vessel ");
+    Serial.print(currentVessel + 1);
+    Serial.print("/3: ");
+    Serial.println(vessel->vesselName);
+    Serial.print("│ MMSI: ");
+    Serial.println(vessel->mmsi);
+    Serial.print("│ Position: ");
+    Serial.print(vessel->latitude, 4);
+    Serial.print(", ");
+    Serial.println(vessel->longitude, 4);
+    Serial.print("│ Speed: ");
+    Serial.print(vessel->sog);
+    Serial.print(" kts | Course: ");
+    Serial.print(vessel->cog);
+    Serial.println("°");
+    Serial.println("│ Sending via ESP-NOW...");
+    
+    esp_err_t result = esp_now_send(receiverAddress, (uint8_t *)vessel, sizeof(AISData));
+    
+    if (result != ESP_OK) {
+      Serial.println("  ✗ ERROR: esp_now_send() failed");
+      Serial.println("─────────────────────────────────────────\n");
+    }
+    // Success/fail is reported in onDataSent callback
+    
+    currentVessel = (currentVessel + 1) % 3;
+  }
+}

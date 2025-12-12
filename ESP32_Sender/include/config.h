@@ -3,7 +3,7 @@
 
 // WiFi Configuration
 #ifndef WIFI_SSID
-#define WIFI_SSID ""
+#define WIFI_SSID "Taco Testing"
 #endif
 
 #ifndef WIFI_PASSWORD

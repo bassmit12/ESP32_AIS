@@ -3,7 +3,7 @@
 
 // WiFi Configuration
 #ifndef WIFI_SSID
-#define WIFI_SSID ""
+#define WIFI_SSID "Taco Testing"
 #endif
 
 #ifndef WIFI_PASSWORD
@@ -12,7 +12,7 @@
 
 // SignalK Server Configuration
 #ifndef SIGNALK_SERVER
-#define SIGNALK_SERVER "192.168.178.98"
+#define SIGNALK_SERVER "145.220.74.158"
 #endif
 
 #ifndef SIGNALK_PORT

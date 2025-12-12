@@ -1,26 +1,18 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include "config.h"
-#include "ESPNowSender.h"
+#include "NRF24Sender.h"
 #include "Display.h"
 #include "VesselData.h"
 
-// Global objects
-ESPNowSender* sender = nullptr;
+NRF24Sender* sender = nullptr;
 VesselData* vesselData = nullptr;
 
 unsigned long lastSendTime = 0;
 int transmissionCount = 0;
-bool lastTransmissionSuccess = false;
-
-// Callback for transmission status
-void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  lastTransmissionSuccess = (status == ESP_NOW_SEND_SUCCESS);
-  Display::printTransmissionResult(lastTransmissionSuccess);
-}
 
 bool initWiFi() {
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   
   int timeout = 0;
@@ -34,20 +26,14 @@ bool initWiFi() {
   return connected;
 }
 
-bool initESPNow() {
-  uint8_t receiverMac[] = {
-    RECEIVER_MAC_0, RECEIVER_MAC_1, RECEIVER_MAC_2,
-    RECEIVER_MAC_3, RECEIVER_MAC_4, RECEIVER_MAC_5
-  };
+bool initNRF24() {
+  sender = new NRF24Sender(NRF24_CE_PIN, NRF24_CSN_PIN);
   
-  sender = new ESPNowSender(receiverMac);
-  sender->setCallback(onDataSent);
-  
-  bool initialized = sender->begin();
+  bool initialized = sender->begin(NRF24_CHANNEL);
   
   uint8_t mac[6];
   WiFi.macAddress(mac);
-  Display::printESPNowStatus(initialized, mac);
+  Display::printESPNowStatus(initialized, mac, NRF24_CHANNEL);
   
   return initialized;
 }
@@ -58,16 +44,13 @@ void setup() {
   
   Display::printHeader();
   
-  // Initialize WiFi
   initWiFi();
   
-  // Initialize ESP-NOW
-  if (!initESPNow()) {
-    Display::printError("ESP-NOW initialization failed!");
+  if (!initNRF24()) {
+    Display::printError("nRF24L01 initialization failed!");
     return;
   }
   
-  // Initialize vessel data
   vesselData = new VesselData(3);
   vesselData->initialize();
   Display::printVesselDatabase(vesselData->getVesselCount());
@@ -75,6 +58,12 @@ void setup() {
 
 void loop() {
   if (!sender || !vesselData) {
+    return;
+  }
+  
+  if (!sender->isConnected()) {
+    Display::printError("nRF24L01 disconnected!");
+    delay(1000);
     return;
   }
   
@@ -88,8 +77,11 @@ void loop() {
     
     Display::printTransmission(transmissionCount, vesselData->getCurrentIndex(), *vessel);
     
-    if (!sender->sendData(*vessel)) {
-      Display::printError("esp_now_send() failed");
+    bool success = sender->sendData(*vessel);
+    Display::printTransmissionResult(success);
+    
+    if (!success) {
+      Display::printError("Transmission failed - check nRF24L01 connection");
     }
     
     vesselData->moveToNext();

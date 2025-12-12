@@ -8,7 +8,7 @@ class Display {
 public:
     static void printHeader();
     static void printWiFiStatus(bool connected, const IPAddress& ip, int channel);
-    static void printESPNowStatus(bool initialized, const uint8_t* mac);
+    static void printESPNowStatus(bool initialized, const uint8_t* mac, int channel);
     static void printVesselDatabase(int count);
     static void printTransmission(int count, int vesselIndex, const AISData& data);
     static void printTransmissionResult(bool success);

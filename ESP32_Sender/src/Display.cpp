@@ -4,7 +4,7 @@ void Display::printHeader() {
     Serial.println("\n\n");
     Serial.println("███████████████████████████████████████████████");
     Serial.println("█                                             █");
-    Serial.println("█      ESP32 AIS SENDER (ESP-NOW)            █");
+    Serial.println("█      ESP32 AIS SENDER (nRF24L01)           █");
     Serial.println("█                                             █");
     Serial.println("███████████████████████████████████████████████");
     Serial.println();
@@ -25,16 +25,17 @@ void Display::printWiFiStatus(bool connected, const IPAddress& ip, int channel) 
     Serial.println("└─────────────────────────────────────┘\n");
 }
 
-void Display::printESPNowStatus(bool initialized, const uint8_t* mac) {
-    Serial.println("┌───────── ESP-NOW SETUP ─────────────┐");
-    Serial.print("│ Sender MAC: ");
+void Display::printESPNowStatus(bool initialized, const uint8_t* mac, int channel) {
+    Serial.println("┌───────── nRF24L01 SETUP ────────────┐");
+    Serial.print("│ ESP32 MAC: ");
     Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X\n", 
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
     if (initialized) {
-        Serial.println("│ ✓ ESP-NOW initialized");
+        Serial.println("│ ✓ nRF24L01 initialized");
+        Serial.printf("│ ✓ Radio channel set to %d\n", channel);
     } else {
-        Serial.println("│ ✗ ERROR: ESP-NOW init failed!");
+        Serial.println("│ ✗ ERROR: nRF24L01 init failed!");
     }
     Serial.println("└─────────────────────────────────────┘\n");
 }
@@ -56,7 +57,7 @@ void Display::printTransmission(int count, int vesselIndex, const AISData& data)
     Serial.printf("│ MMSI: %lu\n", data.mmsi);
     Serial.printf("│ Position: %.4f, %.4f\n", data.latitude, data.longitude);
     Serial.printf("│ Speed: %.1f kts | Course: %.1f°\n", data.sog, data.cog);
-    Serial.println("│ Sending via ESP-NOW...");
+    Serial.println("│ Sending via nRF24L01...");
 }
 
 void Display::printTransmissionResult(bool success) {

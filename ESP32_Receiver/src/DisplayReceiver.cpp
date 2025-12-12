@@ -5,6 +5,7 @@ void DisplayReceiver::printHeader() {
     Serial.println("███████████████████████████████████████████████");
     Serial.println("█                                             █");
     Serial.println("█   ESP32 AIS RECEIVER - SIGNALK GATEWAY     █");
+    Serial.println("█           (nRF24L01 Radio)                 █");
     Serial.println("█                                             █");
     Serial.println("███████████████████████████████████████████████");
     Serial.println();
@@ -29,14 +30,14 @@ void DisplayReceiver::printWiFiStatus(bool connected, const IPAddress& ip, int r
 }
 
 void DisplayReceiver::printESPNowStatus(bool initialized, const uint8_t* mac, int channel) {
-    Serial.println("┌───────── ESP-NOW SETUP ─────────────┐");
-    Serial.print("│ MAC: ");
+    Serial.println("┌───────── nRF24L01 SETUP ────────────┐");
+    Serial.print("│ ESP32 MAC: ");
     Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X\n", 
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
     if (initialized) {
-        Serial.println("│ ✓ ESP-NOW initialized");
-        Serial.printf("│ ✓ ESP-NOW channel set to %d\n", channel);
+        Serial.println("│ ✓ nRF24L01 initialized");
+        Serial.printf("│ ✓ Radio channel set to %d\n", channel);
         Serial.println("│ ✓ Listening for AIS data...");
     } else {
         Serial.println("│ ✗ ERROR: Initialization failed!");
@@ -69,13 +70,13 @@ void DisplayReceiver::printSignalKDisconnected() {
 void DisplayReceiver::printConnectionStatus(bool wifi, bool signalk, bool espnow) {
     Serial.println("\n┌──────────── CONNECTION STATUS ────────────┐");
     
-    Serial.print("│ WiFi:    ");
+    Serial.print("│ WiFi:     ");
     Serial.println(wifi ? "✓ CONNECTED                  " : "✗ DISCONNECTED                  ");
     
-    Serial.print("│ SignalK: ");
+    Serial.print("│ SignalK:  ");
     Serial.println(signalk ? "✓ CONNECTED                  " : "✗ DISCONNECTED                  ");
     
-    Serial.print("│ ESP-NOW: ");
+    Serial.print("│ nRF24L01: ");
     Serial.println(espnow ? "✓ ACTIVE (listening)          " : "✗ INACTIVE                        ");
     
     Serial.println("└────────────────────────────────────────┘\n");

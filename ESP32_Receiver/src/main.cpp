@@ -1,20 +1,21 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include "config.h"
-#include "ESPNowReceiver.h"
+#include "NRF24Receiver.h"
 #include "SignalKClient.h"
 #include "DisplayReceiver.h"
 
-ESPNowReceiver* receiver = nullptr;
+NRF24Receiver* receiver = nullptr;
 SignalKClient* signalk = nullptr;
 
 bool wifiConnected = false;
 bool signalkConnected = false;
+bool radioConnected = false;
 unsigned long lastStatusPrint = 0;
 
 void onAISDataReceived(const AISData& data) {
     Serial.println("\n===============================================");
-    Serial.println("    📡 ESP-NOW TRANSMISSION RECEIVED 📡");
+    Serial.println("    📡 nRF24L01 TRANSMISSION RECEIVED 📡");
     Serial.println("===============================================\n");
     
     DisplayReceiver::printAISData(data);
@@ -32,7 +33,7 @@ void onAISDataReceived(const AISData& data) {
 }
 
 bool initWiFi() {
-    WiFi.mode(WIFI_AP_STA);
+    WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     
     int timeout = 0;
@@ -47,16 +48,17 @@ bool initWiFi() {
     return connected;
 }
 
-bool initESPNow() {
-    receiver = new ESPNowReceiver();
+bool initNRF24() {
+    receiver = new NRF24Receiver(NRF24_CE_PIN, NRF24_CSN_PIN);
     receiver->setDataCallback(onAISDataReceived);
     
-    bool initialized = receiver->begin(ESPNOW_CHANNEL);
+    bool initialized = receiver->begin(NRF24_CHANNEL);
     
     uint8_t mac[6];
     WiFi.macAddress(mac);
-    DisplayReceiver::printESPNowStatus(initialized, mac, ESPNOW_CHANNEL);
+    DisplayReceiver::printESPNowStatus(initialized, mac, NRF24_CHANNEL);
     
+    radioConnected = initialized;
     return initialized;
 }
 
@@ -78,14 +80,14 @@ void setup() {
     
     initWiFi();
     
-    if (!initESPNow()) {
-        DisplayReceiver::printError("ESP-NOW initialization failed!");
+    if (!initNRF24()) {
+        DisplayReceiver::printError("nRF24L01 initialization failed!");
         return;
     }
     
     initSignalK();
     
-    DisplayReceiver::printConnectionStatus(wifiConnected, signalkConnected, true);
+    DisplayReceiver::printConnectionStatus(wifiConnected, signalkConnected, radioConnected);
     
     Serial.println("🟢 SYSTEM READY - Waiting for AIS data...\n");
     Serial.println("===============================================\n");
@@ -131,10 +133,22 @@ void loop() {
         }
     }
     
-    if (millis() - lastStatusPrint > STATUS_PRINT_INTERVAL_MS) {
-        lastStatusPrint = millis();
-        DisplayReceiver::printConnectionStatus(wifiConnected, signalkConnected, true);
+    if (receiver) {
+        receiver->update();
+        
+        bool currentlyConnected = receiver->isConnected();
+        if (currentlyConnected != radioConnected) {
+            radioConnected = currentlyConnected;
+            if (!radioConnected) {
+                DisplayReceiver::printError("nRF24L01 disconnected!");
+            }
+        }
     }
     
-    delay(100);
+    if (millis() - lastStatusPrint > STATUS_PRINT_INTERVAL_MS) {
+        lastStatusPrint = millis();
+        DisplayReceiver::printConnectionStatus(wifiConnected, signalkConnected, radioConnected);
+    }
+    
+    delay(10);
 }

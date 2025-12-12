@@ -21,7 +21,9 @@ private:
     unsigned long _reconnectInterval;
     bool _wasConnected;
     
-    void createNMEASentence(const AISData& data, char* sentence, size_t maxLen);
+    void createAIVDMSentence(const AISData& data, char* sentence, size_t maxLen);
+    void setBits(uint8_t* payload, int start, int len, uint32_t value);
+    void bitsToArmor(uint8_t* payload, int numBits, char* result);
     void latToNMEA(float lat, char* result, char* ns);
     void lonToNMEA(float lon, char* result, char* ew);
     uint8_t calculateChecksum(const char* sentence);
